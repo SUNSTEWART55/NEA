@@ -1,4 +1,13 @@
 import numpy as np
+from tensorflow.keras.datasets import mnist
+
+def load_digit_data():
+    (train_images, train_labels), (test_images, test_labels) = mnist.load_data()
+
+    train_images = train_images.reshape(train_images.shape[0], 784).T / 255.0
+    test_images = test_images.reshape(test_images.shape[0], 784).T / 255.0
+
+    return train_images, train_labels, test_images, test_labels
 
 # creates inital random weights and assigns biases to 0
 def init_layer(neurons_in, neurons_out):
@@ -98,14 +107,56 @@ def train_step(input_pixels, labels, weight_1, bias_1, weight_2, bias_2, weight_
 
     return weight_1, bias_1, weight_2, bias_2, weight_3, bias_3, loss
 
-input_pixels = np.random.randn(784, 5)
+def train_network(train_images, train_labels, weight_1, bias_1, weight_2, bias_2,weight_3, bias_3, learning_rate, epochs, batch_size):
+
+    n_samples = train_images.shape[1]
+    best_accuracy = 0
+    best_weights = None
+
+    for epoch in range(epochs):
+        # shuffles data for each epoch
+        permutation = np.random.permutation(n_samples)
+        shuffled_images = train_images[:, permutation]
+        shuffled_labels = train_labels[permutation]
+
+        epochs_loss = 0
+        n_batches = 0
+
+        for start in range(0, n_samples, batch_size):
+            end = start + batch_size
+            batch_images = shuffled_images[:, start:end]
+            batch_labels = shuffled_labels[start:end]
+
+            weight_1, bias_1, weight_2, bias_2, weight_3, bias_3, loss = train_step(batch_images, batch_labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3, learning_rate)
+
+            epochs_loss += loss
+            n_batches += 1
+
+        average_loss = epochs_loss / n_batches
+        test_accuracy = evaluate(test_images, test_labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3)
+        print(f"epoch {epoch}, average loss = {average_loss}, test accuracy = {test_accuracy * 100:.2f}")
+
+        if test_accuracy > best_accuracy:
+            best_accuracy = test_accuracy
+            best_weights = (weight_1.copy(), bias_1.copy(), weight_2.copy(), bias_2.copy(), weight_3.copy(), bias_3.copy())
+
+    return best_weights
+
+def evaluate(test_images, test_labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3):
+    _, _, _, _, _, output_activated = forward(test_images, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3)
+
+    predictions = np.argmax(output_activated, axis=0)
+    accuracy = np.mean(predictions == test_labels)
+    return accuracy
+
+
+train_images, train_labels, test_images, test_labels = load_digit_data()
 weight_1, bias_1, weight_2, bias_2, weight_3, bias_3 = init_network()
-labels = np.array([3, 7, 1, 9, 2])
 
-for i in range(200):
-    weight_1, bias_1, weight_2, bias_2, weight_3, bias_3, loss = train_step(
-        input_pixels, labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3, learning_rate=0.5
-    )
-    if i % 20 == 0:
-        print(f"step {i}, loss = {loss}")
+weight_1, bias_1, weight_2, bias_2, weight_3, bias_3 = train_network(
+    train_images, train_labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3,
+    learning_rate=0.5, epochs=20, batch_size=64
+)
 
+accuracy = evaluate(test_images, test_labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3)
+print(f"best found accuracy = {accuracy *100:.2f}%")

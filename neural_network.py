@@ -107,7 +107,7 @@ def train_step(input_pixels, labels, weight_1, bias_1, weight_2, bias_2, weight_
 
     return weight_1, bias_1, weight_2, bias_2, weight_3, bias_3, loss
 
-def train_network(train_images, train_labels, weight_1, bias_1, weight_2, bias_2,weight_3, bias_3, learning_rate, epochs, batch_size):
+def train_network(train_images, train_labels, test_images, test_labels, weight_1, bias_1, weight_2, bias_2,weight_3, bias_3, learning_rate, epochs, batch_size):
 
     n_samples = train_images.shape[1]
     best_accuracy = 0
@@ -149,14 +149,20 @@ def evaluate(test_images, test_labels, weight_1, bias_1, weight_2, bias_2, weigh
     accuracy = np.mean(predictions == test_labels)
     return accuracy
 
-
-train_images, train_labels, test_images, test_labels = load_digit_data()
-weight_1, bias_1, weight_2, bias_2, weight_3, bias_3 = init_network()
-
-weight_1, bias_1, weight_2, bias_2, weight_3, bias_3 = train_network(
-    train_images, train_labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3,
-    learning_rate=0.5, epochs=20, batch_size=64
-)
-
-accuracy = evaluate(test_images, test_labels, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3)
-print(f"best found accuracy = {accuracy *100:.2f}%")
+def save_model(path_prefix, weight_1, bias_1, weight_2, bias_2, weight_3, bias_3):
+    np.save(f"{path_prefix}_weight_1.npy", weight_1)
+    np.save(f"{path_prefix}_bias_1.npy", bias_1)
+    np.save(f"{path_prefix}_weight_2.npy", weight_2)
+    np.save(f"{path_prefix}_bias_2.npy", bias_2)
+    np.save(f"{path_prefix}_weight_3.npy", weight_3)
+    np.save(f"{path_prefix}_bias_3.npy", bias_3)
+ 
+ 
+def load_model(path_prefix):
+    weight_1 = np.load(f"{path_prefix}_weight_1.npy")
+    bias_1 = np.load(f"{path_prefix}_bias_1.npy")
+    weight_2 = np.load(f"{path_prefix}_weight_2.npy")
+    bias_2 = np.load(f"{path_prefix}_bias_2.npy")
+    weight_3 = np.load(f"{path_prefix}_weight_3.npy")
+    bias_3 = np.load(f"{path_prefix}_bias_3.npy")
+    return weight_1, bias_1, weight_2, bias_2, weight_3, bias_3

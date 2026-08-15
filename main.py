@@ -2,6 +2,12 @@ import cv2
 import numpy as np
 from neural_network import load_model, forward  # NEA model, not TensorFlow
 
+'''
+Possible issues to fix later:
+- Max() might get brought up by other shapes like a sleeve or bigger writing in the image causing shapes to merge when they shouldn't
+'''
+
+
 MODEL_PATH_PREFIX = "models/trained_model"
 
 # 1. intersection error: when 8 is written, the crossover between the loops

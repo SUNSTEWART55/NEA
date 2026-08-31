@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+.vscode/
+data/SUPABASE_URL=https://cyywbdotdssqovphmctn.supabase.co
+training_data/

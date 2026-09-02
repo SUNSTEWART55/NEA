@@ -2,4 +2,9 @@ venv/
 __pycache__/
 *.pyc
 .vscode/
+<<<<<<< HEAD
 data/
+=======
+data/SUPABASE_URL=https://cyywbdotdssqovphmctn.supabase.co
+training_data/
+>>>>>>> c7d5f3fafea032b7e4de300c48aed96e986c9b84

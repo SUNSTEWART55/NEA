@@ -7,8 +7,7 @@ from ML.data_loader import (
     save_dataset,
     load_saved_dataset,
 )
- 
-# ---- change this to wherever your archive_cleaned folder actually lives ----
+
 KAGGLE_ROOT = r"C:\coding_projects\python_projects\NEA\data\archive_cleaned"
 CONVERTED_OUTPUT = r"C:\coding_projects\python_projects\NEA\data\converted_operators"
  

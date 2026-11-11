@@ -26,6 +26,8 @@ BLUR_FACTOR = 3
 BLOCKSIZE = 11
 C = 15
 
+TARGET_WIDTH = 1200
+
 # Absolute floor only - excludes true single-pixel sensor noise before we've
 # even estimated font size. Everything else scales with the detected
 # handwriting size below, rather than being a fixed pixel count.
@@ -66,7 +68,6 @@ LABELS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
 # Pixels close enough to make same colour, to fill in lighter gaps of pen strokes
 MERGE_RANGE = 6
 
-
 def start_model():
     """
     Loads the trained NEA model. load_model() returns a flat tuple:
@@ -77,21 +78,28 @@ def start_model():
     print("Model loaded, starting webcam...")
     return model
 
+def load_answer_image(image_path):
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError(f"Could not read image: {image_path}")
+    return image
 
-def image_processing(frame):
-    # blurs the image to reduce noise
-    blurred = cv2.GaussianBlur(frame, (BLUR_FACTOR, BLUR_FACTOR), 0)
-    # sets to greyscale
+def resize_to_width(image, target_width=TARGET_WIDTH):
+    height, width = image.shape[:2]
+    scale = target_width / width
+    return cv2.resize(
+        image, (target_width, int(height * scale)),
+        interpolation=cv2.INTER_AREA
+    )
+
+def image_processing(resized):
+    blurred = cv2.GaussianBlur(resized, (BLUR_FACTOR, BLUR_FACTOR), 0)
     gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
-
-    # Makes image inverted black and white, adaptive so it adjusts to light
-    # intensity in different areas of the frame
     threshold = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV, BLOCKSIZE, C
     )
     return threshold
-
 
 def close_small_gaps(threshold, merge_range):
     # creates a circular structuring element by the size of merge_range
@@ -253,89 +261,83 @@ def number_recognition(model, roi, frame, x1, y1, x2, y2):
 
 def main():
     model = start_model()
-    webcam = cv2.VideoCapture(0)
+    raw_image = load_answer_image()
+    resized_image = resize_to_width(raw_image)
+    threshold = image_processing(resized_image)
+    threshold = close_small_gaps(threshold, MERGE_RANGE)
 
-    while True:
-        ret, frame = webcam.read()
-        if not ret:
-            break
+    # finds shapes in the image
+    contours, _ = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # sorts shapes left to right
+    contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])
 
-        threshold = image_processing(frame)
-        threshold = close_small_gaps(threshold, MERGE_RANGE)
+    # Step 1: collect every contour as a raw box first, past only the
+    # absolute noise floor - no size/aspect filtering yet, since that
+    # needs an estimated font size, and merging needs to happen before
+    # small (but legitimate) marks like division dots get judged.
+    raw_boxes = []
+    for shape in contours:
+        x, y, width, height = cv2.boundingRect(shape)
 
-        # finds shapes in the image
-        contours, _ = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # sorts shapes left to right
-        contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])
+        if width >= ABSOLUTE_NOISE_FLOOR and height >= ABSOLUTE_NOISE_FLOOR:
+            x_padding = int(width * PADDING_MULTIPLIER)
+            y_padding = int(height * PADDING_MULTIPLIER)
 
-        # Step 1: collect every contour as a raw box first, past only the
-        # absolute noise floor - no size/aspect filtering yet, since that
-        # needs an estimated font size, and merging needs to happen before
-        # small (but legitimate) marks like division dots get judged.
-        raw_boxes = []
-        for shape in contours:
-            x, y, width, height = cv2.boundingRect(shape)
+            x1 = max(0, x - x_padding)
+            y1 = max(0, y - y_padding)
+            x2 = min(raw_image.shape[1], x + width + x_padding)
+            y2 = min(raw_image.shape[0], y + height + y_padding)
 
-            if width >= ABSOLUTE_NOISE_FLOOR and height >= ABSOLUTE_NOISE_FLOOR:
-                x_padding = int(width * PADDING_MULTIPLIER)
-                y_padding = int(height * PADDING_MULTIPLIER)
+            raw_boxes.append((x1, y1, x2, y2))
 
-                x1 = max(0, x - x_padding)
-                y1 = max(0, y - y_padding)
-                x2 = min(frame.shape[1], x + width + x_padding)
-                y2 = min(frame.shape[0], y + height + y_padding)
+    # Step 2: estimate this frame's handwriting size from the raw boxes,
+    # so every threshold below scales with how big the writing actually
+    # is, instead of being tuned for one distance/zoom level.
+    font_size = estimate_font_size(raw_boxes)
 
-                raw_boxes.append((x1, y1, x2, y2))
+    # Step 3: merge vertically-close, horizontally-aligned shapes - this
+    # is what joins division dots to their line, and joins the two bars
+    # of an equals sign, before either gets judged on size alone.
+    merged_boxes = merge_nearby_shapes(raw_boxes, font_size)
 
-        # Step 2: estimate this frame's handwriting size from the raw boxes,
-        # so every threshold below scales with how big the writing actually
-        # is, instead of being tuned for one distance/zoom level.
-        font_size = estimate_font_size(raw_boxes)
+    print(f"font_size={font_size}")
+    for (x1, y1, x2, y2) in merged_boxes:
+        w, h = x2 - x1, y2 - y1
+        print(f"  merged box: w={w} h={h} ratio={w/h:.2f} max_dim={max(w, h)}")
 
-        # Step 3: merge vertically-close, horizontally-aligned shapes - this
-        # is what joins division dots to their line, and joins the two bars
-        # of an equals sign, before either gets judged on size alone.
-        merged_boxes = merge_nearby_shapes(raw_boxes, font_size)
+    # Step 4: NOW apply the real size/aspect filter, scaled to this
+    # frame's font size. Anything still too small here never found a
+    # merge partner, which is exactly what should happen to real noise.
+    sized_boxes = []
+    min_character_size = (font_size * MIN_CHARACTER_SIZE_RATIO) if font_size else 0
+    for (x1, y1, x2, y2) in merged_boxes:
+        width = x2 - x1
+        height = y2 - y1
+        aspect_ratio = width / height if height else 0
 
-        print(f"font_size={font_size}")
-        for (x1, y1, x2, y2) in merged_boxes:
-            w, h = x2 - x1, y2 - y1
-            print(f"  merged box: w={w} h={h} ratio={w/h:.2f} max_dim={max(w, h)}")
+        if max(width, height) >= min_character_size and ASPECT_MIN < aspect_ratio < ASPECT_MAX:
+            sized_boxes.append((x1, y1, x2, y2))
 
-        # Step 4: NOW apply the real size/aspect filter, scaled to this
-        # frame's font size. Anything still too small here never found a
-        # merge partner, which is exactly what should happen to real noise.
-        sized_boxes = []
-        min_character_size = (font_size * MIN_CHARACTER_SIZE_RATIO) if font_size else 0
-        for (x1, y1, x2, y2) in merged_boxes:
-            width = x2 - x1
-            height = y2 - y1
-            aspect_ratio = width / height if height else 0
+    # Step 5: filter out boxes contained inside other boxes, ONCE, after
+    # all boxes for this frame are known.
+    filtered_boxes = filter_boxes(sized_boxes)
 
-            if max(width, height) >= min_character_size and ASPECT_MIN < aspect_ratio < ASPECT_MAX:
-                sized_boxes.append((x1, y1, x2, y2))
+    # Step 3: recognize each filtered box, using that box's own coordinates
+    # (the old code accidentally reused the last x1,y1,x2,y2 from the
+    # outer loop instead of the box being iterated over).
+    expression = ""
+    for (x1, y1, x2, y2) in filtered_boxes:
+        roi = roi_reshaping(threshold, x1, y1, x2, y2)
+        label = number_recognition(model, roi, resized_image, x1, y1, x2, y2)
+        expression += label
 
-        # Step 5: filter out boxes contained inside other boxes, ONCE, after
-        # all boxes for this frame are known.
-        filtered_boxes = filter_boxes(sized_boxes)
+    cv2.imshow("math detector", raw_image)
+    cv2.imshow("threshold", threshold)
 
-        # Step 3: recognize each filtered box, using that box's own coordinates
-        # (the old code accidentally reused the last x1,y1,x2,y2 from the
-        # outer loop instead of the box being iterated over).
-        expression = ""
-        for (x1, y1, x2, y2) in filtered_boxes:
-            roi = roi_reshaping(threshold, x1, y1, x2, y2)
-            label = number_recognition(model, roi, frame, x1, y1, x2, y2)
-            expression += label
-
-        cv2.imshow("math detector", frame)
-        cv2.imshow("threshold", threshold)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    webcam.release()
-    cv2.destroyAllWindows()
+'''
+put this back into main with an if
+'''
+cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

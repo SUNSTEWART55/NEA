@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import cv2
 import numpy as np
 from neural_network import load_model, forward  # NEA model, not TensorFlow
@@ -337,7 +336,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-=======
+
 """
 main.py
 
@@ -386,4 +385,3 @@ auth_view = AuthView(app, on_login_success)
 auth_view.pack(fill="both", expand=True)
 
 app.mainloop()
->>>>>>> c7d5f3fafea032b7e4de300c48aed96e986c9b84
